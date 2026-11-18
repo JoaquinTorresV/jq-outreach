@@ -1,0 +1,36 @@
+# Para probar todo en local: docker compose up --build   ->   http://localhost:3000
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: local
+      POSTGRES_DB: jqoutreach
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+
+  web:
+    build: .
+    command: npm run start:web
+    ports: ["3000:3000"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://postgres:local@postgres:5432/jqoutreach
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  worker:
+    build: .
+    command: npm run start:worker
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://postgres:local@postgres:5432/jqoutreach
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
+volumes:
+  pgdata:
