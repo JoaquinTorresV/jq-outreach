@@ -1,6 +1,6 @@
-# Una sola imagen para web y worker. Lo que cambia es el comando de inicio:
-#   web    -> npm run start:web    (por defecto)
-#   worker -> npm run start:worker
+# Una sola imagen para web y worker. El rol se elige con la variable APP_ROLE:
+#   APP_ROLE=worker  -> npm run start:worker
+#   (sin variable)   -> npm run start:web
 FROM node:22-bookworm-slim
 
 ENV NODE_ENV=production \
@@ -19,7 +19,7 @@ COPY . .
 RUN DATABASE_URL=postgres://build:build@localhost:5432/build DASHBOARD_PASSWORD=build SESSION_SECRET=build npm run build
 
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>process.exit(r.status<=503?0:1)).catch(()=>process.exit(1))"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD [ "$APP_ROLE" = "worker" ] || node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>process.exit(r.status<=503?0:1)).catch(()=>process.exit(1))"
 
-CMD ["npm", "run", "start:web"]
+CMD ["sh", "-c", "if [ \"$APP_ROLE\" = \"worker\" ]; then exec npm run start:worker; else exec npm run start:web; fi"]
