@@ -4,11 +4,12 @@ import { normalizePhone, splitPhones, looksLikePhone } from './phone';
 import { firstNameOf, looksLikeBusiness, titleCase } from './template';
 
 export type Field =
-  | 'phone' | 'phone_alt' | 'name' | 'business_name' | 'address' | 'city' | 'category'
+  | 'phone' | 'phone_alt' | 'name' | 'business_name' | 'address' | 'city' | 'category' | 'maps_url'
   | 'email' | 'instagram' | 'facebook' | 'website' | 'social' | 'notes' | 'extra' | 'ignore';
 export const FIELD_LABEL: Record<Field, string> = {
   phone: 'Teléfono / WhatsApp', phone_alt: 'Teléfono alternativo', name: 'Nombre de la persona',
   business_name: 'Nombre del negocio', address: 'Dirección', city: 'Ciudad / comuna', category: 'Rubro',
+  maps_url: 'Perfil de Google Maps',
   email: 'Email', instagram: 'Instagram', facebook: 'Facebook', website: 'Sitio web',
   social: 'Redes sociales (mixto)', notes: 'Notas', extra: 'Guardar como dato extra', ignore: 'Ignorar',
 };
@@ -31,12 +32,15 @@ export type ContactDraft = {
   address: string | null;
   city: string | null;
   category: string | null;
+  maps_url: string | null;
   email: string | null;
   instagram: string | null;
   facebook: string | null;
   website: string | null;
   notes: string | null;
   extra: Record<string, string>;
+  stage: 'nuevo' | 'revision';
+  stage_reason: string | null;
 };
 
 export type Rejected = { row: number; reason: string; raw: string[] };
@@ -44,7 +48,7 @@ export type BuildResult = {
   drafts: ContactDraft[];
   rejected: Rejected[];
   duplicatesInFile: number;
-  stats: { total: number; ok: number; withName: number; withBusiness: number; withAddress: number; withSocial: number };
+  stats: { total: number; ok: number; needsReview: number; withName: number; withBusiness: number; withAddress: number; withSocial: number };
 };
 
 const strip = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -169,10 +173,13 @@ type HeaderClass = { field: Field; strength?: number } | null;
 export function classifyHeader(h: string): HeaderClass {
   const k = norm(h);
   if (!k) return null;
-  if (/whatsapp|wsp|watsap|^wa$|^wapp$/.test(k)) return { field: 'phone', strength: 0 };
+  if (/whatsapp.*(posible|possible)|(posible|possible).*whatsapp/.test(k)) return null;
+  if (/telefononormalizado|normalizedphone|^e164$/.test(k)) return { field: 'phone', strength: 0 };
+  if (/whatsapp|wsp|watsap|^wa$|^wapp$/.test(k)) return { field: 'phone', strength: 1 };
   if (/celular|movil|mobile|^cel\d?$|^cell/.test(k)) return { field: 'phone', strength: 1 };
   if (/fijo|landline/.test(k)) return { field: 'phone_alt', strength: 9 };
   if (/telefono|^tel\d?$|fono|phone|numero|^nro|^num$|contactonumero/.test(k)) return { field: 'phone', strength: 2 };
+  if (/^(title|titulo)$/.test(k)) return { field: 'business_name' };
   if (/negocio|empresa|company|business|razonsocial|nombrecomercial|local$|tienda|establecimiento|organizacion|fantasia|marca|clinica|restaurant/.test(k))
     return { field: 'business_name' };
   if (/^(nombre|name|contacto|persona|cliente|propietario|dueno|encargado|responsable|doctor|medico|profesional|fullname|firstname|primernombre)/.test(k) || /^(dr|dra)$/.test(k))
@@ -184,13 +191,16 @@ export function classifyHeader(h: string): HeaderClass {
   if (/instagram|^ig$|^insta/.test(k)) return { field: 'instagram' };
   if (/facebook|^fb$/.test(k)) return { field: 'facebook' };
   if (/redes|social|rrss/.test(k)) return { field: 'social' };
-  if (/web|sitio|^url|pagina|site|dominio/.test(k)) return { field: 'website' };
+  if (/^(estadoweb|webstatus|webstate)$/.test(k)) return null;
+  if (/^(mapsurl|googlemapsurl|linkmaps|urlmapa)$/.test(k)) return { field: 'maps_url' };
+  if (/web|sitio|pagina|site|dominio/.test(k)) return { field: 'website' };
   if (/nota|comentario|observacion|^obs/.test(k)) return { field: 'notes' };
   return null;
 }
 
 const looksEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 const looksUrl = (v: string) => /^(https?:\/\/|www\.)\S+$/i.test(v) || /^[a-z0-9-]+\.(cl|com|co|net|org|io|shop|store|app)(\/\S*)?$/i.test(v);
+const looksLikeGoogleMapsUrl = (v: string) => /^https?:\/\/(?:(?:www\.)?google\.[^/]+\/maps|maps\.google\.[^/]+\/)/i.test(v);
 const looksHandle = (v: string) => /^@[\w.]{2,}$/.test(v) || /instagram\.com\//i.test(v);
 
 export function autoMap(table: ParsedTable, countries: string[]): Field[] {
@@ -206,6 +216,10 @@ export function autoMap(table: ParsedTable, countries: string[]): Field[] {
   const phones: { i: number; strength: number }[] = [];
   if (table.hasHeader) {
     table.headers.forEach((h, i) => {
+      if (norm(h) === 'url') {
+        mapping[i] = col(i).some(looksLikeGoogleMapsUrl) ? 'maps_url' : 'website';
+        return;
+      }
       const c = classifyHeader(h);
       if (!c) return;
       if (c.field === 'phone' || c.field === 'phone_alt') phones.push({ i, strength: c.strength ?? 5 });
@@ -226,6 +240,7 @@ export function autoMap(table: ParsedTable, countries: string[]): Field[] {
   for (const i of free()) {
     if (ratio(i, looksEmail) >= 0.6) mapping[i] = 'email';
     else if (ratio(i, looksHandle) >= 0.6) mapping[i] = 'instagram';
+    else if (ratio(i, looksLikeGoogleMapsUrl) >= 0.6) mapping[i] = 'maps_url';
     else if (ratio(i, looksUrl) >= 0.6) mapping[i] = 'website';
   }
   if (!table.hasHeader) {
@@ -264,6 +279,11 @@ function normInstagram(v: string): string | null {
   return h && /^[\w.]{2,}$/.test(h) ? '@' + h : v || null;
 }
 
+function phoneForReview(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  return raw.trim().startsWith('+') ? `+${digits}` : digits;
+}
+
 export function buildDrafts(table: ParsedTable, mapping: Field[], opts: { countries: string[] }): BuildResult {
   const phoneCols = mapping.map((f, i) => (f === 'phone' ? i : -1)).filter((i) => i >= 0);
   const altCols = mapping.map((f, i) => (f === 'phone_alt' ? i : -1)).filter((i) => i >= 0);
@@ -277,26 +297,36 @@ export function buildDrafts(table: ParsedTable, mapping: Field[], opts: { countr
     const rowNo = idx + rowOffset;
     let reason = 'sin_telefono';
     let phone: string | null = null;
+    let reviewPhone: string | null = null;
+    let reviewReason: string | null = null;
     for (const ci of [...phoneCols, ...altCols]) {
       const cell = r[ci] ?? '';
       if (!cell) continue;
       const cands = splitPhones(cell);
-      if (!cands.length) reason = 'telefono_invalido';
+      if (!cands.length) {
+        reason = 'telefono_invalido';
+        const digits = cell.replace(/\D/g, '');
+        if (digits && !reviewPhone) { reviewPhone = phoneForReview(cell); reviewReason = 'telefono_invalido'; }
+      }
       for (const cand of cands) {
         const res = normalizePhone(cand, opts.countries);
         if (res.ok) { phone = res.e164; break; }
-        reason = res.reason === 'fijo' ? 'telefono_fijo' : 'telefono_invalido';
+        const issue = res.reason === 'fijo' ? 'telefono_fijo' : 'telefono_invalido';
+        reason = issue;
+        if (!reviewPhone) { reviewPhone = phoneForReview(cand); reviewReason = issue; }
       }
       if (phone) break;
     }
+    if (!phone && reviewPhone) phone = reviewPhone;
     if (!phone) {
       if (r.some((c) => c)) rejected.push({ row: rowNo, reason, raw: r });
       return;
     }
 
     const d: ContactDraft = {
-      phone, name: null, first_name: null, business_name: null, address: null, city: null, category: null,
+      phone, name: null, first_name: null, business_name: null, address: null, city: null, category: null, maps_url: null,
       email: null, instagram: null, facebook: null, website: null, notes: null, extra: {},
+      stage: reviewReason ? 'revision' : 'nuevo', stage_reason: reviewReason,
     };
     mapping.forEach((f, ci) => {
       const v = tidy(r[ci]);
@@ -307,11 +337,12 @@ export function buildDrafts(table: ParsedTable, mapping: Field[], opts: { countr
         case 'address': d.address = v; break;
         case 'city': d.city = titleCase(v); break;
         case 'category': d.category = v; break;
+        case 'maps_url': d.maps_url = v; break;
         case 'email': if (looksEmail(v.toLowerCase())) d.email = v.toLowerCase(); break;
         case 'instagram': d.instagram = normInstagram(v); break;
         case 'facebook': d.facebook = v; break;
         case 'website': d.website = v; break;
-        case 'social': socialsFrom(v, d); break;
+        case 'social': socialsFrom(v, d); d.extra[table.headers[ci]] = v; break;
         case 'notes': d.notes = v; break;
         case 'extra': d.extra[table.headers[ci]] = v; break;
         default: break;
@@ -325,6 +356,7 @@ export function buildDrafts(table: ParsedTable, mapping: Field[], opts: { countr
     const prev = byPhone.get(phone);
     if (prev) {
       duplicates++;
+      if (d.stage === 'nuevo') { prev.stage = 'nuevo'; prev.stage_reason = null; }
       for (const k of Object.keys(d) as (keyof ContactDraft)[]) {
         if (k === 'extra') prev.extra = { ...d.extra, ...prev.extra };
         else if (!prev[k] && d[k]) (prev as any)[k] = d[k];
@@ -342,6 +374,7 @@ export function buildDrafts(table: ParsedTable, mapping: Field[], opts: { countr
     stats: {
       total: table.rows.length,
       ok: drafts.length,
+      needsReview: drafts.filter((d) => d.stage === 'revision').length,
       withName: drafts.filter((d) => d.first_name).length,
       withBusiness: drafts.filter((d) => d.business_name).length,
       withAddress: drafts.filter((d) => d.address).length,

@@ -4,6 +4,7 @@ import { Card, PageHeader, StageBadge } from '@/components/ui';
 import { ago, contactLabel } from '@/lib/format';
 import { getAccounts, getPipeline } from '@/lib/queries';
 import { CLOSED, PIPELINE, STAGE_LABEL } from '@/lib/stages';
+import { CAMPAIGN_LABEL } from '@/lib/campaigns';
 
 export default async function Pipeline() {
   const [{ counts, cards }, accounts] = await Promise.all([getPipeline(12), getAccounts()]);
@@ -17,9 +18,10 @@ export default async function Pipeline() {
         {PIPELINE.map((stage) => (
           <div className="col" key={stage}>
             <h3><span>{STAGE_LABEL[stage].replace(/ \(.*\)/, '')}</span><Link href={`/contacts?stage=${stage}`} className="small">{n[stage] ?? 0}</Link></h3>
-            {cards.filter((c: any) => c.stage === stage).map((c: any) => (
+            {cards.filter((c) => c.stage === stage).map((c) => (
               <Link key={c.id} href={`/contacts/${c.id}`} className="kcard">
                 <div className="t">{contactLabel(c)}</div>
+                <div className="m">{CAMPAIGN_LABEL[c.campaign]}</div>
                 <div className="m">{c.phone}{label(c.account_id) ? ` · ${label(c.account_id)}` : ''}</div>
                 <div className="m">{c.last_inbound_at ? `respondió ${ago(c.last_inbound_at)}` : c.next_action_at ? `próximo ${ago(c.next_action_at)}` : `act. ${ago(c.updated_at)}`}</div>
               </Link>

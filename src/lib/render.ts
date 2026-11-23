@@ -4,11 +4,11 @@ import { contactVars, pickVariant, renderTemplate, validateRendered, type Contac
 
 let cache: { at: number; rows: Variant[] } | null = null;
 
-export async function loadVariants(step: number, kind: 'normal' | 'failover' = 'normal'): Promise<Variant[]> {
+export async function loadVariants(step: number, kind: 'normal' | 'failover' = 'normal', campaign: ContactLike['campaign'] = 'web_sales'): Promise<Variant[]> {
   if (!cache || Date.now() - cache.at > 5000) {
-    cache = { at: Date.now(), rows: await q<Variant>('select id, step, kind, name, body, requires, weight, active from templates where active') };
+    cache = { at: Date.now(), rows: await q<Variant>('select id, step, kind, campaign, name, body, requires, weight, active from templates where active') };
   }
-  return cache.rows.filter((v) => v.step === step && v.kind === kind);
+  return cache.rows.filter((v) => v.step === step && v.kind === kind && v.campaign === campaign);
 }
 export function invalidateVariants() { cache = null; }
 
@@ -22,8 +22,9 @@ export type Rendered =
 export async function renderForContact(
   contact: ContactLike, step: number, opts: { failover?: boolean; tz: string; now?: Date },
 ): Promise<Rendered> {
-  let variants = await loadVariants(step, opts.failover ? 'failover' : 'normal');
-  if (!variants.length && opts.failover) variants = await loadVariants(step, 'normal');
+  const campaign = contact.campaign ?? 'web_sales';
+  let variants = await loadVariants(step, opts.failover ? 'failover' : 'normal', campaign);
+  if (!variants.length && opts.failover) variants = await loadVariants(step, 'normal', campaign);
   const vars = contactVars(contact, opts.now ?? new Date(), opts.tz);
   const v = pickVariant(variants, vars);
   if (!v) return { ok: false, reason: 'sin_plantilla_aplicable' };

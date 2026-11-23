@@ -59,7 +59,7 @@ export async function getOverview() {
   return { settings: s, accounts: perAccount, funnel, day, rate, rateByAccount, queue, workers, events };
 }
 
-export type ContactFilters = { q?: string; stage?: string; account?: string; batch?: string; page?: number };
+export type ContactFilters = { q?: string; stage?: string; account?: string; batch?: string; campaign?: string; page?: number };
 
 function contactWhere(f: ContactFilters) {
   const where: string[] = [];
@@ -72,6 +72,7 @@ function contactWhere(f: ContactFilters) {
   if (f.account === 'none') where.push('c.account_id is null');
   else if (f.account) { p.push(Number(f.account)); where.push(`c.account_id = $${p.length}`); }
   if (f.batch) { p.push(Number(f.batch)); where.push(`c.batch_id = $${p.length}`); }
+  if (f.campaign) { p.push(f.campaign); where.push(`c.campaign = $${p.length}`); }
   return { sql: where.length ? 'where ' + where.join(' and ') : '', p };
 }
 
@@ -90,7 +91,7 @@ export async function listContacts(f: ContactFilters, limit = PAGE_SIZE) {
 export async function exportContacts(f: ContactFilters) {
   const { sql, p } = contactWhere(f);
   return q<any>(
-    `select c.phone, c.name, c.business_name, c.address, c.city, c.category, c.instagram, c.facebook, c.website, c.email,
+    `select c.phone, c.name, c.business_name, c.address, c.city, c.category, c.instagram, c.facebook, c.website, c.maps_url, c.email, c.campaign,
             c.stage, c.step, a.label as numero, c.first_sent_at, c.last_outbound_at, c.last_inbound_at, c.next_action_at, c.notes
      from contacts c left join accounts a on a.id = c.account_id ${sql} order by c.id`,
     p,
@@ -112,9 +113,9 @@ export async function getContactDetail(id: number) {
 
 export async function getPipeline(perColumn = 12) {
   const counts = await q<{ stage: string; n: number }>('select stage, count(*)::int as n from contacts group by stage');
-  const cards = await q<any>(
+  const cards = await q<Pick<ContactRow, 'id' | 'first_name' | 'name' | 'business_name' | 'phone' | 'stage' | 'step' | 'account_id' | 'campaign' | 'last_inbound_at' | 'next_action_at' | 'updated_at'>>(
     `select * from (
-       select c.id, c.first_name, c.name, c.business_name, c.phone, c.stage, c.step, c.account_id, c.last_inbound_at, c.next_action_at, c.updated_at,
+       select c.id, c.first_name, c.name, c.business_name, c.phone, c.stage, c.step, c.account_id, c.campaign, c.last_inbound_at, c.next_action_at, c.updated_at,
               row_number() over (partition by c.stage order by (c.stage = 'respondio') desc, c.updated_at desc) as rn
        from contacts c) t where rn <= $1`,
     [perColumn],
@@ -133,7 +134,8 @@ export async function getErrors() {
      where m.direction = 'out' and m.status = 'retry' order by m.retry_at limit 100`,
   );
   const review = await q<any>(
-    `select id, first_name, name, business_name, phone, stage_reason, updated_at from contacts where stage = 'revision' order by updated_at desc limit 100`,
+    `select id, first_name, name, business_name, phone, stage, stage_reason, updated_at
+     from contacts where stage in ('revision','sin_whatsapp','invalido') order by updated_at desc limit 100`,
   );
   return { actionable, retrying, review };
 }

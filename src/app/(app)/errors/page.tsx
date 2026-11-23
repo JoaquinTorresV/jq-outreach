@@ -5,6 +5,7 @@ import Flash from '@/components/Flash';
 import { Badge, Card, Empty, PageHeader } from '@/components/ui';
 import { ago, contactLabel, fmtDateTime } from '@/lib/format';
 import { getErrors, getEvents } from '@/lib/queries';
+import { STAGE_LABEL } from '@/lib/stages';
 
 const HELP: Record<string, string> = {
   timeout: 'WhatsApp no confirmó el envío. Puede haber salido: míralo en el chat y usa “Sí salió”; si no salió, reintenta.',
@@ -60,10 +61,10 @@ export default async function Errors({ searchParams }: { searchParams: Promise<{
       </Card>
 
       <div className="grid cols-2">
-        <Card title={`Contactos en revisión (${review.length})`}>
+        <Card title={`Contactos y teléfonos para revisar (${review.length})`}>
           {review.length === 0 ? <Empty>Ninguno.</Empty> : (
             <table><tbody>{review.map((c: any) => (
-              <tr key={c.id}><td><Link href={`/contacts/${c.id}`}>{contactLabel(c)}</Link></td><td className="small muted">{c.stage_reason}</td><td className="small">{ago(c.updated_at)}</td></tr>
+              <tr key={c.id}><td><Link href={`/contacts/${c.id}`}>{contactLabel(c)}</Link><div className="mono small">{c.phone}</div></td><td><Badge tone="warn">{STAGE_LABEL[c.stage]}</Badge><div className="small muted">{c.stage_reason}</div></td><td className="small">{ago(c.updated_at)}</td></tr>
             ))}</tbody></table>
           )}
         </Card>

@@ -1,10 +1,12 @@
 import { greeting } from './time';
+import type { Campaign } from './campaigns';
 
 export type Vars = Record<string, string | undefined | null>;
 export type Variant = {
   id: number;
   step: number;
   kind: 'normal' | 'failover';
+  campaign: Campaign;
   name: string;
   body: string;
   requires: string[];
@@ -143,7 +145,7 @@ export function firstNameOf(full: string | null | undefined): string | null {
 export type ContactLike = {
   name?: string | null; first_name?: string | null; business_name?: string | null; address?: string | null;
   city?: string | null; category?: string | null; email?: string | null; instagram?: string | null;
-  facebook?: string | null; website?: string | null; extra?: Record<string, unknown> | null;
+  facebook?: string | null; website?: string | null; campaign?: Campaign; extra?: Record<string, unknown> | null;
 };
 
 export function contactVars(c: ContactLike, now: Date, tz: string): Vars {

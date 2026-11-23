@@ -6,6 +6,7 @@ import { invalidateVariants } from '../src/lib/render';
 import { Dispatcher, type SessionControl } from '../worker/dispatcher';
 import { FakeClient } from '../worker/fake-client';
 import type { ClientHandlers } from '../worker/client';
+import type { Campaign } from '../src/lib/campaigns';
 
 export { closePool, exec, one, q };
 
@@ -33,13 +34,13 @@ export async function mkAccount(o: Partial<{ label: string; mode: 'auto' | 'manu
 }
 
 let n = 0;
-export async function mkContact(o: Partial<{ phone: string; first_name: string | null; business_name: string | null; stage: string; account_id: number | null; step: number; next: string | null }> = {}) {
+export async function mkContact(o: Partial<{ phone: string; first_name: string | null; business_name: string | null; campaign: Campaign; stage: string; account_id: number | null; step: number; next: string | null }> = {}) {
   n++;
   const phone = o.phone ?? `+5698${String(1000000 + n)}`;
   const r = await one<{ id: number }>(
-    `insert into contacts (phone, jid, first_name, name, business_name, stage, account_id, step, next_action_at)
-     values ($1,$2,$3,$3,$4,$5,$6,$7,$8) returning id`,
-    [phone, phone.replace('+', '') + '@s.whatsapp.net', o.first_name === undefined ? 'Ana' : o.first_name, o.business_name ?? null, o.stage ?? 'valido', o.account_id ?? null, o.step ?? 0, o.next ?? null],
+    `insert into contacts (phone, jid, first_name, name, business_name, campaign, stage, account_id, step, next_action_at)
+     values ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9) returning id`,
+    [phone, phone.replace('+', '') + '@s.whatsapp.net', o.first_name === undefined ? 'Ana' : o.first_name, o.business_name ?? null, o.campaign ?? 'web_sales', o.stage ?? 'valido', o.account_id ?? null, o.step ?? 0, o.next ?? null],
   );
   return r!.id;
 }

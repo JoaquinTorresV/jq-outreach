@@ -1,16 +1,18 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { contactOutcome, deleteContact, messageAction, saveNotes } from '@/app/actions';
+import { contactOutcome, correctContactPhone, deleteContact, messageAction, saveNotes } from '@/app/actions';
 import Flash from '@/components/Flash';
 import { Badge, Card, PageHeader, StageBadge } from '@/components/ui';
 import { ago, contactLabel, fmtDateTime } from '@/lib/format';
 import { getContactDetail } from '@/lib/queries';
 import { OUTCOME_STAGES } from '@/lib/maintenance';
 import { STAGE_LABEL } from '@/lib/stages';
+import { CAMPAIGN_LABEL } from '@/lib/campaigns';
 
 const STATUS_TONE: Record<string, 'ok' | 'warn' | 'bad' | 'info' | 'mute'> = {
   sent: 'info', delivered: 'ok', read: 'ok', failed: 'bad', unconfirmed: 'warn', blocked: 'warn', retry: 'warn', queued: 'mute', sending: 'info', cancelled: 'mute', received: 'ok',
 };
+const isHttpUrl = (value: string) => /^https?:\/\/\S+$/i.test(value);
 
 export default async function ContactPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ msg?: string }> }) {
   const { id } = await params;
@@ -18,15 +20,19 @@ export default async function ContactPage({ params, searchParams }: { params: Pr
   const d = Number(id) ? await getContactDetail(Number(id)) : null;
   if (!d) notFound();
   const { contact: c, messages, events } = d;
+  const canCorrectPhone = c.step === 0 && (
+    c.stage === 'sin_whatsapp' || c.stage === 'invalido'
+    || (c.stage === 'revision' && ['telefono_fijo', 'telefono_invalido'].includes(c.stage_reason ?? ''))
+  );
   const fields: [string, string | null][] = [
     ['Nombre', c.name], ['Negocio', c.business_name], ['Dirección', c.address], ['Ciudad', c.city], ['Rubro', c.category],
-    ['Instagram', c.instagram], ['Facebook', c.facebook], ['Web', c.website], ['Email', c.email],
+    ['Instagram', c.instagram], ['Facebook', c.facebook], ['Web', c.website], ['Google Maps', c.maps_url], ['Email', c.email],
     ...Object.entries(c.extra ?? {}).map(([k, v]) => [k, String(v)] as [string, string]),
   ];
   return (
     <>
       <PageHeader title={contactLabel(c)} sub={<><span className="mono">{c.phone}</span> · <StageBadge stage={c.stage} />{c.stage_reason ? <span className="muted"> ({c.stage_reason})</span> : null}</>}>
-        <a className="btn small" href={`https://wa.me/${c.phone.replace('+', '')}`} target="_blank" rel="noreferrer">Abrir en WhatsApp</a>
+        {!['revision', 'sin_whatsapp', 'invalido'].includes(c.stage) ? <a className="btn small" href={`https://wa.me/${c.phone.replace('+', '')}`} target="_blank" rel="noreferrer">Abrir en WhatsApp</a> : null}
         <Link className="btn small" href="/contacts">← Contactos</Link>
       </PageHeader>
       <Flash msg={msg} />
@@ -72,6 +78,7 @@ export default async function ContactPage({ params, searchParams }: { params: Pr
           <Card title="Estado">
             <table><tbody>
               <tr><td className="muted">Paso</td><td>{c.step}/4</td></tr>
+              <tr><td className="muted">Campaña</td><td>{CAMPAIGN_LABEL[c.campaign]}</td></tr>
               <tr><td className="muted">Número asignado</td><td>{c.account_label ?? '—'}</td></tr>
               <tr><td className="muted">Primer envío</td><td>{fmtDateTime(c.first_sent_at)}</td></tr>
               <tr><td className="muted">Último envío</td><td>{ago(c.last_outbound_at)}</td></tr>
@@ -79,6 +86,16 @@ export default async function ContactPage({ params, searchParams }: { params: Pr
               <tr><td className="muted">Próxima acción</td><td>{c.next_action_at ? `${fmtDateTime(c.next_action_at)} (${ago(c.next_action_at)})` : '—'}</td></tr>
               <tr><td className="muted">Verificado</td><td>{c.verified_at ? ago(c.verified_at) : 'no'}</td></tr>
             </tbody></table>
+            {canCorrectPhone ? (
+              <form action={correctContactPhone} style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+                <input type="hidden" name="contact_id" value={c.id} />
+                <label>Corregir teléfono
+                  <input name="phone" type="tel" defaultValue={c.phone} required />
+                </label>
+                <p className="muted small">Al guardar se normaliza el número y vuelve a “Nuevo” para verificar WhatsApp antes de entrar al embudo.</p>
+                <div><button className="btn primary small">Guardar y verificar de nuevo</button></div>
+              </form>
+            ) : null}
             <form action={contactOutcome} className="form-row" style={{ marginTop: 12 }}>
               <input type="hidden" name="contact_id" value={c.id} />
               <label>Mover a (detiene los seguimientos)
@@ -92,7 +109,13 @@ export default async function ContactPage({ params, searchParams }: { params: Pr
           </Card>
           <Card title="Datos">
             <table><tbody>
-              {fields.filter(([, v]) => v).map(([k, v]) => <tr key={k}><td className="muted">{k}</td><td>{v}</td></tr>)}
+              {fields.filter(([, v]) => v).map(([k, v]) => (
+                <tr key={k}><td className="muted">{k}</td><td>
+                  {k === 'Google Maps' && v && isHttpUrl(v)
+                    ? <a href={v} target="_blank" rel="noreferrer">Abrir perfil en Google Maps ↗</a>
+                    : v}
+                </td></tr>
+              ))}
               {fields.every(([, v]) => !v) ? <tr><td className="muted">Solo se conoce el teléfono.</td></tr> : null}
             </tbody></table>
           </Card>

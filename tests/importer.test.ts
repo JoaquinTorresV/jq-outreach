@@ -40,6 +40,14 @@ test('sin encabezados: detecta teléfono por contenido', async () => {
   assert.equal(b.drafts[0].business_name, 'Ferretería Don Lucho');
 });
 
+test('sin encabezados: conserva teléfonos fijos para revisión manual', async () => {
+  const { t, b } = await run('Clínica Veterinaria,+56 2 2731 5397\n', 'fixed.csv');
+  assert.equal(t.hasHeader, false);
+  assert.equal(b.drafts.length, 1);
+  assert.equal(b.drafts[0].stage, 'revision');
+  assert.equal(b.drafts[0].stage_reason, 'telefono_fijo');
+});
+
 test('TXT de una sola columna: "Nombre teléfono" y solo números', async () => {
   const a = await run('Juan Pérez 987654321\nAna Soto +56 9 5876 5432\nsolo texto\n', 'd.txt');
   assert.equal(a.b.drafts.length, 2);
@@ -56,13 +64,39 @@ test('duplicados dentro del archivo se fusionan y se reportan', async () => {
   assert.equal(b.drafts[0].email, 'ana@x.cl');
 });
 
-test('filas rechazadas con motivo (fijo, inválido, vacío)', async () => {
+test('teléfonos fijos e inválidos quedan en revisión y los que no tienen número se rechazan', async () => {
   const { b } = await run('Nombre,Teléfono\nA,22 123 4567\nB,123\nC,\nD,987654321\n', 'g.csv');
-  assert.equal(b.drafts.length, 1);
+  assert.equal(b.drafts.length, 3);
+  assert.equal(b.stats.needsReview, 2);
+  assert.equal(b.drafts.find((d) => d.name === 'A')?.stage_reason, 'telefono_fijo');
+  assert.equal(b.drafts.find((d) => d.name === 'B')?.stage_reason, 'telefono_invalido');
+  assert.equal(b.drafts.find((d) => d.name === 'D')?.stage, 'nuevo');
   const reasons = Object.fromEntries(b.rejected.map((r) => [r.raw[0], r.reason]));
-  assert.equal(reasons.A, 'telefono_fijo');
-  assert.equal(reasons.B, 'telefono_invalido');
   assert.equal(reasons.C, 'sin_telefono');
+});
+
+test('mapea perfiles con Google Maps separado del sitio web y conserva campos extra', async () => {
+  const { m, b } = await run(
+    'title,categoryName,address,city,state,phone,telefono_normalizado,whatsapp_posible,totalScore,reviewsCount,website,url,placeId,segmento,estado_web,web_url,evidencia,red_social\nClínica Veterinaria Municipal Puente Alto,Hospital veterinario,Clavero 330,Puente Alto,Región Metropolitana,+56 2 2731 5397,+56227315397,no,3.9,1299,,https://www.google.com/maps/search/?api=1&query=Clinica,ChIJ123,A_sitio_web,sin_web,,"18 resultados revisados, ninguna web propia",\n',
+    'leads.csv',
+  );
+  assert.equal(m[0], 'business_name');
+  assert.equal(m[1], 'category');
+  assert.equal(m[5], 'phone_alt');
+  assert.equal(m[6], 'phone');
+  assert.equal(m[7], 'extra');
+  assert.equal(m[11], 'maps_url');
+  assert.equal(m[14], 'extra');
+  assert.equal(b.drafts.length, 1);
+  assert.equal(b.drafts[0].business_name, 'Clínica Veterinaria Municipal Puente Alto');
+  assert.equal(b.drafts[0].category, 'Hospital veterinario');
+  assert.equal(b.drafts[0].maps_url, 'https://www.google.com/maps/search/?api=1&query=Clinica');
+  assert.equal(b.drafts[0].website, null);
+  assert.equal(b.drafts[0].stage, 'revision');
+  assert.equal(b.drafts[0].extra.whatsapp_posible, 'no');
+  assert.equal(b.drafts[0].extra.placeId, 'ChIJ123');
+  assert.equal(b.drafts[0].extra.estado_web, 'sin_web');
+  assert.equal(b.drafts[0].extra.evidencia, '18 resultados revisados, ninguna web propia');
 });
 
 test('dos columnas de teléfono: usa el WhatsApp y cae al alternativo', async () => {

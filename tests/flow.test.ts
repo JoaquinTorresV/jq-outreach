@@ -25,7 +25,7 @@ describe('flujo completo', () => {
   test('primer mensaje automático + 3 seguimientos + agotado', async () => {
     const acct = await mkAccount({ mode: 'auto' });
     // se deja solo la variante personalizada para poder verificar nombre y negocio (la elección entre variantes es aleatoria)
-    await exec(`update templates set active = false where step = 1 and name <> 'Apertura personalizada (nombre + negocio)'`);
+    await exec(`update templates set active = false where step = 1 and name <> 'Primer contacto · nombre + negocio'`);
     const cid = await mkContact({ first_name: 'María', business_name: 'Peluquería Lucía' });
     const { run, fake } = mkDispatcher(acct);
 
@@ -59,6 +59,27 @@ describe('flujo completo', () => {
     assert.equal((await contact(cid)).stage, 'agotado');
     const ms = await msgs(cid);
     assert.deepEqual(ms.map((m: any) => [m.step, m.status]), [[1, 'sent'], [2, 'sent'], [3, 'sent'], [4, 'sent']]);
+  });
+
+  test('cada seguimiento usa las plantillas de la campaña del contacto', async () => {
+    const acct = await mkAccount();
+    const cid = await mkContact({ campaign: 'whatsapp_automation', business_name: 'Peluquería Lucía' });
+    const { run } = mkDispatcher(acct);
+
+    await run();
+    for (const step of [2, 3, 4]) {
+      await exec('update contacts set next_action_at = $2 where id = $1', [cid, past()]);
+      await run();
+    }
+
+    const sent = await q<{ step: number; campaign: string; body: string }>(
+      `select m.step, t.campaign, m.body from messages m join templates t on t.id = m.template_id
+       where m.contact_id = $1 order by m.step`,
+      [cid],
+    );
+    assert.deepEqual(sent.map((m) => m.campaign), Array(4).fill('whatsapp_automation'));
+    assert.match(sent[0].body, /WhatsApp/);
+    assert.equal((await contact(cid)).campaign, 'whatsapp_automation');
   });
 
   test('respuesta cancela los seguimientos; opt-out detectado', async () => {

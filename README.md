@@ -29,7 +29,7 @@ Web y worker salen del **mismo repositorio y la misma imagen**; solo cambia el c
 
 ## Flujo de uso
 
-1. **Importar**: sube CSV, Excel (.xlsx) o TXT. El sistema detecta columnas (nombre, negocio, teléfono, dirección, Instagram…), muestra una vista previa y te deja corregir el mapeo. Filas sin nombre o sin negocio se importan igual; teléfonos inválidos o duplicados se informan, no se pierden en silencio.
+1. **Importar**: sube CSV, Excel (.xlsx) o TXT. Elige una campaña por archivo: **Venta de páginas web** para leads sin web, o **Automatización de WhatsApp** para negocios con web. Importa cada grupo por separado; los contactos que ya existían conservan su campaña. Ambas campañas usan los intervalos de seguimiento configurados en *Ajustes*, pero sus plantillas están separadas. El sistema detecta columnas (nombre, negocio, teléfono, dirección, Instagram…), muestra una vista previa y te deja corregir el mapeo. Los teléfonos fijos o inválidos con dígitos se guardan en **Errores y revisión** con el perfil y enlace a Google Maps; corrige el teléfono desde el perfil para que se vuelva a verificar. Las filas sin ningún teléfono se informan como rechazadas.
 2. **Plantillas**: revisa/edita las variantes de cada paso. Siempre deja una que funcione sin datos.
 3. **Modo prueba** (Ajustes): recorre todo el flujo sin enviar nada y con los días de espera convertidos en minutos. Al terminar, “Limpiar datos de prueba”.
 4. **Cola manual**: el primer mensaje lo envías tú (más seguro). Pulsa “Traer contactos”, abre cada chat con “Abrir WhatsApp”, envía; el worker detecta el envío y desde ahí gestiona los seguimientos. Si prefieres automático, cambia el modo del número.

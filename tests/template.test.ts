@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { renderTemplate, pickVariant, requiredVars, validateRendered, contactVars, firstNameOf, type Variant } from '../src/lib/template';
 
 const V = (id: number, body: string, extra: Partial<Variant> = {}): Variant => ({
-  id, step: 1, kind: 'normal', name: 'v' + id, body, requires: [], weight: 1, active: true, ...extra,
+  id, step: 1, kind: 'normal', campaign: 'web_sales', name: 'v' + id, body, requires: [], weight: 1, active: true, ...extra,
 });
 
 test('variables, respaldo y limpieza de puntuación', () => {

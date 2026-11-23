@@ -1,15 +1,17 @@
 'use client';
 import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
+import { CAMPAIGN_LABEL, CAMPAIGNS, type Campaign } from '@/lib/campaigns';
 
 type Preview = {
   filename: string; kind: string; sheets: string[] | null; sheet: string | null; hasHeader: boolean; headers: string[]; samples: string[][];
+  campaign: Campaign;
   mapping: string[]; fields: Record<string, string>; warnings: string[];
-  stats: { total: number; ok: number; withName: number; withBusiness: number; withAddress: number; withSocial: number };
+  stats: { total: number; ok: number; needsReview: number; withName: number; withBusiness: number; withAddress: number; withSocial: number };
   duplicatesInFile: number; existing: number; rejected: { row: number; reason: string; raw: string[] }[]; rejectedTotal: number;
   preview: Record<string, any>[];
 };
-type Result = { batchId: number; inserted: number; updated: number; total: number; duplicatesInFile: number; rejected: { row: number; reason: string; raw: string[] }[] };
+type Result = { batchId: number; inserted: number; updated: number; total: number; needsReview: number; campaign: Campaign; duplicatesInFile: number; rejected: { row: number; reason: string; raw: string[] }[] };
 
 const REASON: Record<string, string> = { sin_telefono: 'sin teléfono', telefono_invalido: 'teléfono inválido', telefono_fijo: 'teléfono fijo (no WhatsApp)' };
 
@@ -18,6 +20,7 @@ export default function ImportForm() {
   const [pv, setPv] = useState<Preview | null>(null);
   const [mapping, setMapping] = useState<string[]>([]);
   const [sheet, setSheet] = useState<string>('');
+  const [campaign, setCampaign] = useState<Campaign>('web_sales');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const router = useRouter();
@@ -28,6 +31,7 @@ export default function ImportForm() {
     if (!f) return null;
     const fd = new FormData();
     fd.set('file', f);
+    fd.set('campaign', campaign);
     if (m) fd.set('mapping', JSON.stringify(m));
     if (sh) fd.set('sheet', sh);
     const res = await fetch(url, { method: 'POST', body: fd });
@@ -65,7 +69,13 @@ export default function ImportForm() {
   return (
     <>
       <section className="card">
-        <h2>1. Elige el archivo</h2>
+        <h2>1. Elige la campaña y el archivo</h2>
+        <label style={{ maxWidth: 340 }}>Campaña para este archivo
+          <select value={campaign} disabled={busy} onChange={(e) => setCampaign(e.target.value as Campaign)}>
+            {CAMPAIGNS.map((c) => <option key={c} value={c}>{CAMPAIGN_LABEL[c]}</option>)}
+          </select>
+        </label>
+        <p className="muted small">Importa por separado los archivos de cada campaña. Los contactos que ya existían conservan su campaña.</p>
         <p className="muted small" style={{ marginTop: -6 }}>CSV, TSV, TXT o Excel (.xlsx). Puede traer nombre de la persona, del negocio, teléfono, dirección y redes; los datos que falten no son problema. También sirve un TXT con solo números, uno por línea.</p>
         <input ref={fileRef} type="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,text/csv,text/plain" onChange={() => preview(null, '')} disabled={busy} />
         {busy ? <p className="muted small">Leyendo…</p> : null}
@@ -104,13 +114,14 @@ export default function ImportForm() {
           </section>
 
           <section className="card">
-            <h2>3. Resultado esperado</h2>
+            <h2>3. Resultado esperado · {CAMPAIGN_LABEL[campaign]}</h2>
             <div className="grid cols-4">
-              <div className="stat"><div className="stat-value">{pv.stats.ok}</div><div className="stat-label">contactos válidos de {pv.stats.total} filas</div></div>
+              <div className="stat"><div className="stat-value">{pv.stats.ok}</div><div className="stat-label">contactos importables de {pv.stats.total} filas</div></div>
               <div className="stat"><div className="stat-value">{pv.existing}</div><div className="stat-label">ya existían (solo se completan datos faltantes)</div></div>
               <div className={`stat ${pv.rejectedTotal ? 'warn' : ''}`}><div className="stat-value">{pv.rejectedTotal}</div><div className="stat-label">filas rechazadas</div></div>
               <div className="stat"><div className="stat-value">{pv.duplicatesInFile}</div><div className="stat-label">repetidos dentro del archivo (fusionados)</div></div>
             </div>
+            {pv.stats.needsReview ? <p className="alert warn small">{pv.stats.needsReview} contacto(s) tienen un teléfono fijo o inválido. Se importarán a revisión y no entrarán al embudo hasta corregir el número.</p> : null}
             <p className="muted small">Con nombre de persona: <b>{pv.stats.withName}</b> · con negocio: <b>{pv.stats.withBusiness}</b> · con dirección: <b>{pv.stats.withAddress}</b> · con redes/web: <b>{pv.stats.withSocial}</b>. A quienes les falte el nombre se les enviará una variante de mensaje que no lo necesita.</p>
             {pv.preview.length ? (
               <div className="table-wrap"><table>
@@ -136,8 +147,8 @@ export default function ImportForm() {
       {result ? (
         <section className="card">
           <h2>Importación lista</h2>
-          <p className="alert ok"><b>{result.inserted}</b> contactos nuevos · <b>{result.updated}</b> ya existían (se completaron datos) · <b>{result.rejected.length}</b> rechazados · lote #{result.batchId}.</p>
-          <p className="muted small">El sistema verifica poco a poco cuáles tienen WhatsApp y los deja como “válidos” para el primer mensaje. Nada se envía hasta que lo hagas desde <a href="/manual">Cola manual</a> o actives el modo automático en un número.</p>
+          <p className="alert ok"><b>{result.inserted}</b> contactos nuevos · <b>{result.updated}</b> ya existían (se completaron datos) · campaña: <b>{CAMPAIGN_LABEL[result.campaign]}</b> · <b>{result.needsReview}</b> para revisar teléfono · <b>{result.rejected.length}</b> sin teléfono utilizable · lote #{result.batchId}.</p>
+          <p className="muted small">Los teléfonos importables se verifican poco a poco. Los que requieren revisión no reciben mensajes; corrige su número desde el perfil para que vuelvan a verificarse. Nada se envía hasta que lo hagas desde <a href="/manual">Cola manual</a> o actives el modo automático en un número.</p>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <a className="btn small" href={`/contacts?batch=${result.batchId}`}>Ver contactos del lote</a>
             {result.rejected.length ? <button className="btn small" onClick={downloadRejected}>Descargar rechazados (CSV)</button> : null}

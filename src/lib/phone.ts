@@ -68,5 +68,8 @@ export function normalizePhone(raw: string, countries: string[] = ['CL']): Phone
 
 /** ¿La celda parece contener un teléfono? (para detectar columnas por contenido) */
 export function looksLikePhone(v: string, countries: string[]): boolean {
-  return splitPhones(v).some((x) => normalizePhone(x, countries).ok);
+  return splitPhones(v).some((x) => {
+    const result = normalizePhone(x, countries);
+    return result.ok || result.reason === 'fijo';
+  });
 }

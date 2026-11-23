@@ -10,6 +10,9 @@ import {
 } from '@/lib/maintenance';
 import { invalidateVariants } from '@/lib/render';
 import { DEFAULTS, getSettings, setSetting, type Settings } from '@/lib/settings';
+import { parseCampaign } from '@/lib/campaigns';
+import { defaultCountry, extraCountries } from '@/lib/env';
+import { normalizePhone } from '@/lib/phone';
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? '').trim();
 const int = (fd: FormData, k: string, min: number, max: number, fallback: number) => {
@@ -78,6 +81,7 @@ export async function accountCommand(fd: FormData) {
 export async function saveTemplate(fd: FormData) {
   await requireAuth();
   const id = int(fd, 'id', 0, 1e9, 0);
+  const campaign = parseCampaign(fd.get('campaign'));
   const step = int(fd, 'step', 1, 4, 1);
   const kind = str(fd, 'kind') === 'failover' ? 'failover' : 'normal';
   const name = str(fd, 'name') || 'Variante';
@@ -86,9 +90,9 @@ export async function saveTemplate(fd: FormData) {
   const requires = str(fd, 'requires').split(',').map((s) => s.trim()).filter(Boolean);
   if (!body) return back('/templates', 'El texto no puede estar vacío');
   if (id) {
-    await exec(`update templates set step=$2, kind=$3, name=$4, body=$5, weight=$6, requires=$7, active=$8, updated_at=now() where id=$1`, [id, step, kind, name, body, weight, requires, bool(fd, 'active')]);
+    await exec(`update templates set campaign=$2, step=$3, kind=$4, name=$5, body=$6, weight=$7, requires=$8, active=$9, updated_at=now() where id=$1`, [id, campaign, step, kind, name, body, weight, requires, bool(fd, 'active')]);
   } else {
-    await exec(`insert into templates (step, kind, name, body, weight, requires, active) values ($1,$2,$3,$4,$5,$6,true)`, [step, kind, name, body, weight, requires]);
+    await exec(`insert into templates (step, kind, campaign, name, body, weight, requires, active) values ($1,$2,$3,$4,$5,$6,$7,true)`, [step, kind, campaign, name, body, weight, requires]);
   }
   invalidateVariants();
   revalidatePath('/templates');
@@ -171,6 +175,43 @@ export async function saveNotes(fd: FormData) {
   const id = int(fd, 'contact_id', 0, 1e12, 0);
   await exec('update contacts set notes = $2, updated_at = now() where id = $1', [id, String(fd.get('notes') ?? '').slice(0, 4000) || null]);
   back(`/contacts/${id}`, 'Notas guardadas');
+}
+
+export async function correctContactPhone(fd: FormData) {
+  await requireAuth();
+  const id = int(fd, 'contact_id', 0, 1e12, 0);
+  const raw = str(fd, 'phone');
+  const countries = [...new Set([defaultCountry(), ...extraCountries()])];
+  const normalized = normalizePhone(raw, countries);
+  if (!normalized.ok) {
+    const message = normalized.reason === 'fijo'
+      ? 'Ese número parece fijo; ingresa un móvil compatible con WhatsApp.'
+      : 'Ingresa un número móvil válido con código de país.';
+    return back(`/contacts/${id}`, message);
+  }
+
+  const contact = await one<{ stage: string; stage_reason: string | null; step: number }>(
+    'select stage, stage_reason, step from contacts where id = $1', [id],
+  );
+  const phoneReview = contact?.stage === 'sin_whatsapp' || contact?.stage === 'invalido'
+    || (contact?.stage === 'revision' && ['telefono_fijo', 'telefono_invalido'].includes(contact.stage_reason ?? ''));
+  if (!contact || contact.step !== 0 || !phoneReview) {
+    return back(`/contacts/${id}`, 'Este contacto ya no está esperando una corrección de teléfono.');
+  }
+  const duplicate = await one<{ id: number }>('select id from contacts where phone = $1 and id <> $2', [normalized.e164, id]);
+  if (duplicate) return back(`/contacts/${id}`, 'Ese número ya pertenece a otro contacto.');
+
+  const updated = await exec(
+    `update contacts set phone = $2, jid = null, lid = null, stage = 'nuevo', stage_reason = null,
+       verify_attempts = 0, verified_at = null, next_action_at = null, account_id = null,
+       failover_pending = false, updated_at = now()
+     where id = $1 and step = 0`,
+    [id, normalized.e164],
+  );
+  if (!updated) return back(`/contacts/${id}`, 'No se pudo actualizar el número; vuelve a cargar el contacto.');
+  revalidatePath('/contacts');
+  revalidatePath('/errors');
+  back(`/contacts/${id}`, 'Número actualizado; se volverá a verificar antes de entrar al embudo.');
 }
 
 export async function deleteContact(fd: FormData) {

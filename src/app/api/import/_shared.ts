@@ -1,4 +1,5 @@
 import { defaultCountry, extraCountries } from '@/lib/env';
+import { parseCampaign } from '@/lib/campaigns';
 import { autoMap, buildDrafts, parseFile, type Field } from '@/lib/importer';
 
 export const MAX_BYTES = 25 * 1024 * 1024;
@@ -14,6 +15,7 @@ export async function readUpload(req: Request) {
   if (file.size > MAX_BYTES) throw new Error('El archivo supera los 25 MB');
   const buf = Buffer.from(await file.arrayBuffer());
   const sheet = String(fd.get('sheet') ?? '') || undefined;
+  const campaign = parseCampaign(fd.get('campaign') ?? 'web_sales');
   const table = await parseFile(buf, file.name, { sheet, countries: countries() });
   let mapping: Field[] = autoMap(table, countries());
   const raw = fd.get('mapping');
@@ -22,5 +24,5 @@ export async function readUpload(req: Request) {
     if (Array.isArray(parsed) && parsed.length === table.headers.length) mapping = parsed;
   }
   const built = buildDrafts(table, mapping, { countries: countries() });
-  return { file, table, mapping, built };
+  return { file, table, mapping, built, campaign };
 }

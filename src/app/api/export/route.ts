@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: Request) {
   if (!(await isAuthed())) return new Response('No autorizado', { status: 401 });
   const u = new URL(req.url).searchParams;
-  const rows = await exportContacts({ q: u.get('q') ?? undefined, stage: u.get('stage') ?? undefined, account: u.get('account') ?? undefined, batch: u.get('batch') ?? undefined });
+  const rows = await exportContacts({ q: u.get('q') ?? undefined, stage: u.get('stage') ?? undefined, account: u.get('account') ?? undefined, batch: u.get('batch') ?? undefined, campaign: u.get('campaign') ?? undefined });
   // BOM para que Excel respete los acentos
   const csv = '﻿' + Papa.unparse(rows);
   return new Response(csv, {

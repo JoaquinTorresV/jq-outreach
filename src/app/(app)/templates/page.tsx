@@ -5,6 +5,7 @@ import { pct } from '@/lib/format';
 import { getTemplates } from '@/lib/queries';
 import { renderTemplate, requiredVars, spinCombos, type Vars } from '@/lib/template';
 import { greeting } from '@/lib/time';
+import { CAMPAIGNS, CAMPAIGN_LABEL } from '@/lib/campaigns';
 
 const STEP_NAME: Record<number, string> = { 1: 'Primer mensaje', 2: 'Seguimiento 1', 3: 'Seguimiento 2', 4: 'Seguimiento 3 (cierre)' };
 const SAMPLES: { label: string; vars: Vars }[] = [
@@ -35,8 +36,11 @@ export default async function Templates({ searchParams }: { searchParams: Promis
         </div>
       </Card>
 
-      {[1, 2, 3, 4].map((step) => {
-        const list = all.filter((t: any) => t.step === step);
+      {CAMPAIGNS.map((campaign) => (
+        <section key={campaign}>
+          <h2>{CAMPAIGN_LABEL[campaign]}</h2>
+          {[1, 2, 3, 4].map((step) => {
+        const list = all.filter((t: any) => t.campaign === campaign && t.step === step);
         const generic = list.some((t: any) => t.active && t.kind === 'normal' && requiredVars(t.body, t.requires).length === 0);
         return (
           <Card key={step} title={`Paso ${step} · ${STEP_NAME[step]}`}>
@@ -59,6 +63,7 @@ export default async function Templates({ searchParams }: { searchParams: Promis
                   <div className="grid cols-2" style={{ gap: 12 }}>
                     <form action={saveTemplate} style={{ display: 'grid', gap: 8 }}>
                       <input type="hidden" name="id" value={t.id} />
+                      <input type="hidden" name="campaign" value={campaign} />
                       <div className="form-grid">
                         <label>Nombre<input name="name" defaultValue={t.name} /></label>
                         <label>Paso<select name="step" defaultValue={t.step}>{[1, 2, 3, 4].map((s) => <option key={s} value={s}>{s}</option>)}</select></label>
@@ -86,6 +91,7 @@ export default async function Templates({ searchParams }: { searchParams: Promis
               <summary>+ Nueva variante para este paso</summary>
               <form action={saveTemplate} style={{ display: 'grid', gap: 8 }}>
                 <input type="hidden" name="step" value={step} />
+                <input type="hidden" name="campaign" value={campaign} />
                 <div className="form-grid">
                   <label>Nombre<input name="name" placeholder="Ej. Apertura con rubro" /></label>
                   <label>Tipo<select name="kind"><option value="normal">Normal</option><option value="failover">Failover (otro número)</option></select></label>
@@ -97,7 +103,9 @@ export default async function Templates({ searchParams }: { searchParams: Promis
             </details>
           </Card>
         );
-      })}
+          })}
+        </section>
+      ))}
     </>
   );
 }

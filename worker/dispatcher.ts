@@ -97,8 +97,8 @@ type Built = { ok: true; text: string; variantId: number; hash: string } | { ok:
 /** Arma el texto final: variante según datos disponibles, variables, (IA opcional), validación y control de duplicados. */
 export async function buildText(contact: ContactRow, step: number, accountId: number, s: Settings): Promise<Built> {
   const kind = step > 1 && contact.failover_pending ? 'failover' : 'normal';
-  let variants = await loadVariants(step, kind);
-  if (!variants.length && kind === 'failover') variants = await loadVariants(step, 'normal');
+  let variants = await loadVariants(step, kind, contact.campaign);
+  if (!variants.length && kind === 'failover') variants = await loadVariants(step, 'normal', contact.campaign);
   const vars = contactVars(contact, new Date(), s.timezone);
   for (let attempt = 0; attempt < 8; attempt++) {
     const v = pickVariant(variants, vars);

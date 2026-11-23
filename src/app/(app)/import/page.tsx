@@ -4,6 +4,7 @@ import ImportForm from '@/components/ImportForm';
 import { Card, PageHeader } from '@/components/ui';
 import { fmtDateTime } from '@/lib/format';
 import { getBatches } from '@/lib/queries';
+import { CAMPAIGN_LABEL, type Campaign } from '@/lib/campaigns';
 
 export default async function ImportPage({ searchParams }: { searchParams: Promise<{ msg?: string }> }) {
   const { msg } = await searchParams;
@@ -16,10 +17,10 @@ export default async function ImportPage({ searchParams }: { searchParams: Promi
       <Card title="Lotes importados">
         {batches.length === 0 ? <p className="empty">Todavía no importaste nada.</p> : (
           <div className="table-wrap"><table>
-            <thead><tr><th>Lote</th><th>Archivo</th><th>Fecha</th><th>Nuevos</th><th>Ya existían</th><th>Rechazados</th><th></th></tr></thead>
+            <thead><tr><th>Lote</th><th>Archivo</th><th>Campaña seleccionada</th><th>Fecha</th><th>Nuevos</th><th>Ya existían</th><th>Rechazados</th><th></th></tr></thead>
             <tbody>{batches.map((b: any) => (
               <tr key={b.id}>
-                <td><a href={`/contacts?batch=${b.id}`}>#{b.id}</a></td><td>{b.filename}</td><td className="small">{fmtDateTime(b.created_at)}</td>
+                <td><a href={`/contacts?batch=${b.id}`}>#{b.id}</a></td><td>{b.filename}</td><td>{CAMPAIGN_LABEL[b.campaign as Campaign]}</td><td className="small">{fmtDateTime(b.created_at)}</td>
                 <td>{b.imported}</td><td>{b.updated}</td><td>{b.invalid}</td>
                 <td><form action={deleteBatch}><input type="hidden" name="id" value={b.id} /><button className="btn small danger" title="Elimina solo los contactos de este lote que nunca recibieron mensajes">Quitar sin contactar</button></form></td>
               </tr>
