@@ -16,35 +16,74 @@ export type AiChatInput = {
 export type AiChatResult = { reply: string; action: AiChatAction };
 
 const DEFAULT_SYSTEM_PROMPT = `Eres el asistente virtual de jqsystem, una agencia chilena de tecnologia para negocios.
-Atiendes por WhatsApp a duenos y encargados que respondieron a Joaquin.
-Tu objetivo principal es conseguir una reunion corta de 15 minutos con Joaquin.
-Si la persona quiere pagar al instante, puedes entregar la opcion de pago indicada en el contexto.
-No cierres contratos ni inventes datos.
+Atiendes por WhatsApp a duenos y encargados que respondieron a Joaquin. Tu objetivo es entender que necesitan y, si tiene sentido, acercarlos a una reunion breve de 15 minutos con Joaquin.
 
-JQSYSTEM ofrece paginas web desde US$250, webs con agenda desde US$400, tiendas desde US$500 y agentes de WhatsApp personalizados.
-Las paginas web se empiezan con un pago inicial del 50% y se completan al entregar.
-El sitio de ejemplos es https://jqsystem-web.vercel.app y son conceptos de diseno, no clientes reales.
-WhatsApp: +56 9 3211 5412.
+JQSYSTEM ofrece paginas web desde US$250, webs con agenda desde US$400, tiendas desde US$500 y agentes de WhatsApp personalizados. Las paginas web comienzan con un pago inicial del 50% y el resto se paga al entregar. El plazo estimado es menos de un dia despues de recibir logo, fotos y textos. Los agentes de WhatsApp se cotizan segun el alcance; no inventes un precio.
+El sitio https://jqsystem-web.vercel.app muestra conceptos de diseno, no clientes reales. WhatsApp: +56 9 3211 5412.
+
+Responde primero lo que la persona pregunto, usando solo la informacion disponible. Si no sabes algo, dilo con naturalidad y ofrece confirmarlo con Joaquin. No inventes precios, disponibilidad, descuentos, clientes, resultados ni funciones.
+
+Actua como un setter consultivo: conversa con calidez y naturalidad, entiende el negocio y su necesidad de a una pregunta por vez, explica brevemente el beneficio que corresponda y propone una reunion solo cuando sea un siguiente paso razonable. No presiones, no repitas argumentos ni hagas que cada mensaje suene a venta. No saludes de nuevo en cada turno.
+Si dicen que pasaran la informacion a administracion y que contactaran si hay interes, agradece y di que quedas atento; no insistas ni asumas que ya aceptaron.
+Si alguien confirma una reunion o quiere pagar/contratar, deriva a Joaquin. Si pide no recibir mensajes, despide una sola vez y no vuelvas a escribir.
 
 Responde solo JSON valido con este formato:
 {"reply":"texto para WhatsApp","action":"reply"}
 Acciones validas: reply, handoff, meeting_confirmed, payment_requested, opt_out.
-Usa handoff si quiere hablar con una persona, cotizacion exacta, contrato, factura, reclama o hace una pregunta que no puedes responder.
-Usa meeting_confirmed solo si confirmo explicitamente una reunion o un horario.
-Usa payment_requested si quiere pagar o contratar.
-Usa opt_out si pide expresamente no recibir mensajes.
-Mensajes cortos: 1-3 frases, una sola pregunta, español de Chile, sin listas ni formato.`;
+Usa handoff si quiere hablar con una persona, necesita una cotizacion personalizada, contrato, factura, reclama o hace una pregunta que no puedes responder.
+Usa meeting_confirmed solo cuando confirme explicitamente una reunion o un horario. Usa payment_requested si quiere pagar o contratar. Usa opt_out si pide expresamente no recibir mensajes.
+Mensajes de 1-3 frases cortas, espanol de Chile, sin listas ni formato, con maximo una pregunta relevante.`;
 
 export function isWhatsAppTemplateReply(text: string): boolean {
-  const t = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
-  return [
+  const t = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const exactPhrases = [
     'hola, dime como te llamas y que necesitas',
     'hola, como te llamas y que necesitas',
+    'como te llamas y que necesitas',
+    'cual es tu nombre y que necesitas',
+    'dime tu nombre y que necesitas',
     'hola, que necesitas',
+    'que necesitas',
+    'que servicio necesitas',
+    'como te llamas',
+    'cual es tu nombre',
+    'dime tu nombre',
     'hola, en que podemos ayudarte',
     'hola, en que puedo ayudarte',
+    'en que podemos asistirte',
     'bienvenido',
-  ].some((phrase) => t.includes(phrase));
+  ].map((phrase) => phrase.replace(/[^a-z0-9]+/g, ' '));
+  if (exactPhrases.some((phrase) => t.includes(phrase))) return true;
+
+  const automaticPhrases = [
+    'te has comunicado con',
+    'gracias por comunicarte con',
+    'dentro de unos momentos tu consulta sera resuelta',
+    'te responderemos a la brevedad',
+    'te responderemos en breve',
+    'te recordamos que nuestra atencion es 24 horas',
+    'por orden de llegada',
+    'por favor comunicate por telefono',
+    'no podremos atender mensajes por whatsapp',
+    'valor de consulta',
+    'consulta tiene un valor',
+    'consulta tiene valor',
+    'horario de atencion',
+    'horarios de atencion',
+    'busca servicio de',
+    'servicios disponibles',
+    'conoce nuestros servicios',
+  ];
+  if (automaticPhrases.some((phrase) => t.includes(phrase))) return true;
+
+  const mentionsSchedule = /\b(?:lunes|martes|miercoles|jueves|viernes|sabado|domingo|feriados?)\b/.test(t)
+    && /\b(?:atencion|horario|abierto|cerrado)\b/.test(t)
+    && /\b(?:[01]?\d|2[0-3])\s+[0-5]\d\b/.test(t);
+  if (mentionsSchedule) return true;
+
+  const offersServices = /\b(?:ofrecemos|contamos con|tenemos|nuestros servicios)\b/.test(t)
+    && /\b(?:servicios?|peluqueria|insumos|consulta|urgencias|vacunas?|banos?)\b/.test(t);
+  return offersServices;
 }
 
 /** Reescribe levemente un mensaje saliente sin cambiar su significado. */
@@ -94,6 +133,8 @@ export async function aiChatReply(input: AiChatInput): Promise<AiChatResult | nu
     `Negocio: ${input.contact.business_name || 'desconocido'}`,
     `Rubro: ${input.contact.category || 'desconocido'}`,
     `Ciudad: ${input.contact.city || 'desconocida'}`,
+    `Campana de origen: ${input.contact.campaign === 'whatsapp_automation' ? 'automatizacion de WhatsApp' : 'venta de paginas web'}`,
+    `Sitio web conocido: ${input.contact.website || 'desconocido'}`,
   ].join('\n');
   const history = input.history.slice(-20).map((m) =>
     `${m.direction === 'in' ? 'Cliente' : 'Jqsystem'}: ${m.body || ''}`,
@@ -103,6 +144,7 @@ export async function aiChatReply(input: AiChatInput): Promise<AiChatResult | nu
     input.stripePaymentLink ? `Link de pago Stripe: ${input.stripePaymentLink}` : '',
   ].filter(Boolean).join('\n');
   const system = `${input.systemPrompt || DEFAULT_SYSTEM_PROMPT}\n\nDatos disponibles:\n${contactContext}\n${paymentContext ? `\nPagos:\n${paymentContext}` : ''}\n\nHistorial:\n${history || 'Sin historial previo'}`;
+  const prompt = `${system}\n\nGuia de conversacion: responde primero la pregunta concreta y adapta la respuesta al negocio, a la campana de origen y al historial, sin repetir informacion ya dada. Mantente calido, claro y natural; evita frases genericas, insistencia y mensajes largos. Como setter consultivo, busca entender una necesidad real con una pregunta breve y ofrece una reunion de 15 minutos solo si ayuda a avanzar. Si la persona dice que pasara la informacion a administracion o a otra persona encargada y que te contactaran si hay interes, agradece cordialmente y di que quedas atento, sin presionar ni afirmar que ya aceptaron; responde con action "reply".`;
 
   try {
     if (input.provider === 'openai') {
@@ -114,7 +156,7 @@ export async function aiChatReply(input: AiChatInput): Promise<AiChatResult | nu
           model,
           temperature: 0.4,
           response_format: { type: 'json_object' },
-          messages: [{ role: 'system', content: system }, { role: 'user', content: input.incoming }],
+          messages: [{ role: 'system', content: prompt }, { role: 'user', content: input.incoming }],
         }),
       });
       if (!res.ok) throw new Error(`OpenAI ${res.status}`);
@@ -129,7 +171,7 @@ export async function aiChatReply(input: AiChatInput): Promise<AiChatResult | nu
       body: JSON.stringify({
         model,
         max_tokens: 300,
-        system,
+        system: prompt,
         messages: [{ role: 'user', content: input.incoming }],
       }),
     });

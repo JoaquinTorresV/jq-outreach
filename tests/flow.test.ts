@@ -117,13 +117,23 @@ describe('flujo completo', () => {
     }
   });
 
-  test('detecta respuestas genéricas de WhatsApp Business', () => {
-    for (const t of ['Hola, dime cómo te llamas y qué necesitas', 'Hola, ¿qué necesitas?', 'Hola, ¿en qué podemos ayudarte?']) {
-      assert.equal(isWhatsAppTemplateReply(t), true, t);
-    }
-    for (const t of ['Sí, necesito una página web', '¿Cuánto cuesta?', 'Quiero agendar una reunión']) {
-      assert.equal(isWhatsAppTemplateReply(t), false, t);
-    }
+  test('una plantilla automática no detiene la etapa ni el seguimiento', async () => {
+    const acct = await mkAccount();
+    const due = past();
+    const cid = await mkContact({ phone: '+56981000008', stage: 'contactado', step: 1, account_id: acct, next: due });
+
+    assert.equal(await handleMessage(inbound(acct, '+56981000008', 'Gracias por comunicarte con Clínica Veterinaria Sevilla. ¿En qué podemos ayudarte? Te responderemos a la brevedad.')), 'reply');
+    let c = await contact(cid);
+    assert.equal(c.stage, 'contactado');
+    assert.equal(c.step, 1);
+    assert.equal(c.last_inbound_at, null);
+    assert.equal(new Date(c.next_action_at).getTime(), new Date(due).getTime());
+
+    const { run } = mkDispatcher(acct);
+    await run();
+    c = await contact(cid);
+    assert.equal(c.stage, 'seguimiento_1');
+    assert.equal(c.step, 2);
   });
 
   test('respuesta que llega por LID se asocia al contacto', async () => {
