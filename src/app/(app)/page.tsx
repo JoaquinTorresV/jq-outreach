@@ -1,15 +1,22 @@
 import Link from 'next/link';
 import { accountCommand, toggleSwitch } from '@/app/actions';
 import AutoRefresh from '@/components/AutoRefresh';
+import CopyButton from '@/components/CopyButton';
 import Flash from '@/components/Flash';
 import { AccountBadge, Badge, Card, Meter, PageHeader, Stat } from '@/components/ui';
-import { ago, fmtDateTime, pct } from '@/lib/format';
-import { getOverview } from '@/lib/queries';
+import { ago, contactLabel, fmtDateTime, pct } from '@/lib/format';
+import { ensureManualDrafts } from '@/lib/maintenance';
+import { getManualQueue, getOverview } from '@/lib/queries';
 import { PIPELINE, CLOSED, STAGE_LABEL } from '@/lib/stages';
 
 export default async function Overview({ searchParams }: { searchParams: Promise<{ msg?: string }> }) {
   const { msg } = await searchParams;
   const o = await getOverview();
+  const manualAccounts = o.accounts.filter((a) => a.first_message_mode === 'manual' && a.status === 'activa' && !a.simulated);
+  const manualQueues = await Promise.all(manualAccounts.map(async (account) => {
+    await ensureManualDrafts(account.id, 20);
+    return { account, drafts: await getManualQueue(account.id) };
+  }));
   const funnel = Object.fromEntries(o.funnel.map((f) => [f.stage, f.n]));
   const total = o.funnel.reduce((a, f) => a + f.n, 0);
   const maxBar = Math.max(1, ...o.funnel.map((f) => f.n));
@@ -33,6 +40,30 @@ export default async function Overview({ searchParams }: { searchParams: Promise
         <Stat label="Requieren tu atención" value={(o.day?.needs_action ?? 0) + (o.day?.in_review ?? 0)} tone={(o.day?.needs_action ?? 0) + (o.day?.in_review ?? 0) ? 'bad' : undefined}
           sub={<Link href="/errors">ver errores</Link>} />
       </div>
+
+      {manualAccounts.length > 0 ? (
+        <Card title="Primeros mensajes pendientes">
+          <p className="muted small">Copia el texto y envíalo desde el WhatsApp del número indicado. Al detectar el envío, los seguimientos continúan automáticamente. Para cambiar el texto, saltar un contacto o marcarlo como enviado, abre la cola manual.</p>
+          {manualQueues.every(({ drafts }) => drafts.length === 0) ? (
+            <p className="empty">No hay mensajes listos ahora. <Link href="/manual">Ver cola manual</Link>.</p>
+          ) : (
+            <div className="grid cols-2">
+              {manualQueues.flatMap(({ account, drafts }) => drafts.map((draft: any) => (
+                <Card key={draft.message_id} title={contactLabel(draft)}>
+                  <div className="muted small">{account.label} · {account.phone ?? 'sin número vinculado'} · {draft.phone}</div>
+                  {draft.address || draft.instagram || draft.website ? <div className="muted small">{[draft.address, draft.instagram, draft.website].filter(Boolean).join(' · ')}</div> : null}
+                  <div className="draft">{draft.body}</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <a className="btn small primary" target="_blank" rel="noreferrer" href={`https://wa.me/${draft.phone.replace('+', '')}?text=${encodeURIComponent(draft.body)}`}>Abrir WhatsApp</a>
+                    <CopyButton text={draft.body} />
+                    <Link className="btn small" href={`/manual?account=${account.id}`}>Gestionar cola</Link>
+                  </div>
+                </Card>
+              )))}
+            </div>
+          )}
+        </Card>
+      ) : null}
 
       <h2 style={{ margin: '0 0 10px' }}>Números de WhatsApp</h2>
       {o.accounts.length === 0 ? (

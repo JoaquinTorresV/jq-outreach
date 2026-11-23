@@ -2,7 +2,7 @@ import { after, before, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { closePool, contact, exec, mkAccount, mkContact, mkDispatcher, msgs, q, resetDb } from './helpers';
 import { setSetting } from '../src/lib/settings';
-import { claimManualDrafts, discardMessage, manualCapacity, markManualSent, markMessageSent, rerollDraft, resetDryRun, retryAllByCode, retryMessage, skipDraft } from '../src/lib/maintenance';
+import { claimManualDrafts, discardMessage, ensureManualDrafts, manualCapacity, markManualSent, markMessageSent, rerollDraft, resetDryRun, retryAllByCode, retryMessage, skipDraft } from '../src/lib/maintenance';
 import { handleMessage } from '../worker/inbound';
 import { invalidateVariants } from '../src/lib/render';
 
@@ -82,6 +82,22 @@ describe('mantenimiento', () => {
 });
 
 describe('cola manual', () => {
+  test('prepara automáticamente un lote y no reserva otro mientras quedan borradores', async () => {
+    const acct = await mkAccount({ mode: 'manual', newCap: 10 });
+    for (let i = 0; i < 6; i++) await mkContact({ phone: `+5698161000${i}`, first_name: `Nombre${i}` });
+
+    assert.equal(await ensureManualDrafts(acct, 2), 2);
+    assert.equal(await ensureManualDrafts(acct, 2), 0);
+
+    let drafts = await q(`select contact_id from messages where account_id = $1 and status = 'queued' and step = 1`, [acct]);
+    assert.equal(drafts.length, 2);
+    for (const draft of drafts) await markManualSent(draft.contact_id);
+
+    assert.equal(await ensureManualDrafts(acct, 2), 2);
+    drafts = await q(`select contact_id from messages where account_id = $1 and status = 'queued' and step = 1`, [acct]);
+    assert.equal(drafts.length, 2);
+  });
+
   test('reserva un lote, respeta el cupo, permite saltar y detecta el envío real', async () => {
     const acct = await mkAccount({ mode: 'manual', newCap: 3 });
     for (let i = 0; i < 6; i++) await mkContact({ phone: `+5698160000${i}`, first_name: `Nombre${i}` });

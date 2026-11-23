@@ -122,7 +122,7 @@ export async function manualCapacity(accountId: number) {
 }
 
 /** Reserva el siguiente lote de contactos válidos para una cuenta y deja un texto listo para cada uno. */
-export async function claimManualDrafts(accountId: number, count: number): Promise<{ taken: number; skipped: number; reason?: string }> {
+export async function claimManualDrafts(accountId: number, count: number, onlyIfQueueEmpty = false): Promise<{ taken: number; skipped: number; reason?: string }> {
   const cap = await manualCapacity(accountId);
   if (!cap) return { taken: 0, skipped: 0, reason: 'cuenta_inexistente' };
   const take = Math.min(count, cap.left);
@@ -130,6 +130,14 @@ export async function claimManualDrafts(accountId: number, count: number): Promi
   const s = await getSettings();
   let taken = 0, skipped = 0;
   await tx(async (c) => {
+    await c.query('select pg_advisory_xact_lock(91827, $1)', [accountId]);
+    if (onlyIfQueueEmpty) {
+      const queued = await c.query(
+        `select exists (select 1 from messages where account_id = $1 and direction = 'out' and status = 'queued' and step = 1) as has_queue`,
+        [accountId],
+      );
+      if (queued.rows[0]?.has_queue) return;
+    }
     const rows = (await c.query(
       `select ct.* from contacts ct
        where ct.stage = 'valido' and ct.step = 0 and (ct.account_id is null or ct.account_id = $1)
@@ -154,6 +162,10 @@ export async function claimManualDrafts(accountId: number, count: number): Promi
     }
   });
   return { taken, skipped };
+}
+
+export async function ensureManualDrafts(accountId: number, count: number): Promise<number> {
+  return (await claimManualDrafts(accountId, count, true)).taken;
 }
 
 export async function rerollDraft(contactId: number): Promise<boolean> {
