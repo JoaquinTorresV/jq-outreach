@@ -27,12 +27,25 @@ Actua como un setter consultivo: conversa con calidez y naturalidad, entiende el
 Si dicen que pasaran la informacion a administracion y que contactaran si hay interes, agradece y di que quedas atento; no insistas ni asumas que ya aceptaron.
 Si alguien confirma una reunion o quiere pagar/contratar, deriva a Joaquin. Si pide no recibir mensajes, despide una sola vez y no vuelvas a escribir.
 
-Responde solo JSON valido con este formato:
-{"reply":"texto para WhatsApp","action":"reply"}
-Acciones validas: reply, handoff, meeting_confirmed, payment_requested, opt_out.
+Devuelve el texto de WhatsApp junto con una accion valida: reply, handoff, meeting_confirmed, payment_requested u opt_out.
 Usa handoff si quiere hablar con una persona, necesita una cotizacion personalizada, contrato, factura, reclama o hace una pregunta que no puedes responder.
 Usa meeting_confirmed solo cuando confirme explicitamente una reunion o un horario. Usa payment_requested si quiere pagar o contratar. Usa opt_out si pide expresamente no recibir mensajes.
 Mensajes de 1-3 frases cortas, espanol de Chile, sin listas ni formato, con maximo una pregunta relevante.`;
+
+const CHAT_ACTIONS: AiChatAction[] = ['reply', 'handoff', 'meeting_confirmed', 'payment_requested', 'opt_out'];
+const ANTHROPIC_CHAT_TOOL = {
+  name: 'respond_to_contact',
+  description: 'Devuelve el mensaje breve para WhatsApp y la accion de conversacion correspondiente.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      reply: { type: 'string', description: 'Texto breve que se enviara al contacto por WhatsApp.' },
+      action: { type: 'string', enum: CHAT_ACTIONS },
+    },
+    required: ['reply', 'action'],
+    additionalProperties: false,
+  },
+};
 
 export function isWhatsAppTemplateReply(text: string): boolean {
   const t = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -144,7 +157,7 @@ export async function aiChatReply(input: AiChatInput): Promise<AiChatResult | nu
     input.stripePaymentLink ? `Link de pago Stripe: ${input.stripePaymentLink}` : '',
   ].filter(Boolean).join('\n');
   const system = `${input.systemPrompt || DEFAULT_SYSTEM_PROMPT}\n\nDatos disponibles:\n${contactContext}\n${paymentContext ? `\nPagos:\n${paymentContext}` : ''}\n\nHistorial:\n${history || 'Sin historial previo'}`;
-  const prompt = `${system}\n\nGuia de conversacion: responde primero la pregunta concreta y adapta la respuesta al negocio, a la campana de origen y al historial, sin repetir informacion ya dada. Mantente calido, claro y natural; evita frases genericas, insistencia y mensajes largos. Como setter consultivo, busca entender una necesidad real con una pregunta breve y ofrece una reunion de 15 minutos solo si ayuda a avanzar. Si la persona dice que pasara la informacion a administracion o a otra persona encargada y que te contactaran si hay interes, agradece cordialmente y di que quedas atento, sin presionar ni afirmar que ya aceptaron; responde con action "reply".`;
+  const prompt = `${system}\n\nGuia de conversacion: responde primero la pregunta concreta y adapta la respuesta al negocio, a la campana de origen y al historial, sin repetir informacion ya dada. Mantente calido, claro y natural; evita frases genericas, insistencia y mensajes largos. Como setter consultivo, busca entender una necesidad real con una pregunta breve y ofrece una reunion de 15 minutos solo si ayuda a avanzar. Si la persona dice que pasara la informacion a administracion o a otra persona encargada y que te contactaran si hay interes, agradece cordialmente y di que quedas atento, sin presionar ni afirmar que ya aceptaron; responde con action "reply". Usa la salida estructurada solicitada para devolver reply y action.`;
 
   try {
     if (input.provider === 'openai') {
@@ -170,13 +183,19 @@ export async function aiChatReply(input: AiChatInput): Promise<AiChatResult | nu
       headers: { 'content-type': 'application/json', 'x-api-key': anthropicKey!, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({
         model,
-        max_tokens: 300,
+        max_tokens: 500,
         system: prompt,
         messages: [{ role: 'user', content: input.incoming }],
+        tools: [ANTHROPIC_CHAT_TOOL],
+        tool_choice: { type: 'tool', name: ANTHROPIC_CHAT_TOOL.name },
       }),
     });
     if (!res.ok) throw new Error(`Anthropic ${res.status}`);
-    const data = await res.json() as { content?: { type: string; text?: string }[] };
+    const data = await res.json() as {
+      content?: { type: string; name?: string; input?: unknown; text?: string }[];
+    };
+    const toolResult = data.content?.find((c) => c.type === 'tool_use' && c.name === ANTHROPIC_CHAT_TOOL.name);
+    if (toolResult) return parseChatResult(JSON.stringify(toolResult.input));
     const text = data.content?.find((c) => c.type === 'text')?.text;
     return parseChatResult(text);
   } catch (e) {
@@ -190,8 +209,7 @@ function parseChatResult(text: string | undefined): AiChatResult | null {
   try {
     const parsed = JSON.parse(text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()) as Partial<AiChatResult>;
     if (!parsed.reply || typeof parsed.reply !== 'string') return null;
-    const actions: AiChatAction[] = ['reply', 'handoff', 'meeting_confirmed', 'payment_requested', 'opt_out'];
-    const action = actions.includes(parsed.action as AiChatAction) ? parsed.action as AiChatAction : 'reply';
+    const action = CHAT_ACTIONS.includes(parsed.action as AiChatAction) ? parsed.action as AiChatAction : 'reply';
     if (parsed.reply.length > 1000) return null;
     return { reply: parsed.reply.trim(), action };
   } catch {
