@@ -19,6 +19,9 @@ export type ContactRow = {
   verify_attempts: number; verified_at: string | null; failover_pending: boolean;
   first_sent_at: string | null; last_outbound_at: string | null; last_inbound_at: string | null;
   notes: string | null; created_at: string; updated_at: string;
+  ai_enabled: boolean;
+  ai_handoff_at: string | null;
+  ai_last_action: string | null;
 };
 
 export type MessageRow = {

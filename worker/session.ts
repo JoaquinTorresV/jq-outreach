@@ -138,7 +138,7 @@ export class AccountSession implements SessionControl {
     },
 
     onMessage: async (ev) => {
-      try { await handleMessage(ev); } catch (e) { await logEvent('error', 'error_mensaje_entrante', { error: (e as Error).message }, { accountId: this.id }); }
+      try { await handleMessage(ev, this.client ?? undefined); } catch (e) { await logEvent('error', 'error_mensaje_entrante', { error: (e as Error).message }, { accountId: this.id }); }
     },
     onMessageStatus: async (waId, status) => { await handleStatus(this.id, waId, status).catch(() => {}); },
     onLidMapping: async (m) => { await handleLidMapping(this.id, m).catch(() => {}); },

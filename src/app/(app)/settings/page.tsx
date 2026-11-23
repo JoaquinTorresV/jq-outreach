@@ -77,6 +77,26 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           </div>
           <label className="inline" style={{ marginTop: 12 }}><input type="checkbox" name="ai_personalization" defaultChecked={s.ai_personalization} /> Reescribir levemente cada mensaje con IA (requiere ANTHROPIC_API_KEY en el servidor; si falla se usa la plantilla)</label>
         </Card>
+        <Card title="Agente de respuestas por WhatsApp">
+          <label className="inline"><input type="checkbox" name="ai_chat_enabled" defaultChecked={s.ai_chat_enabled} /> Responder automáticamente conversaciones entrantes</label>
+          <div className="form-grid" style={{ marginTop: 12 }}>
+            <label>Proveedor
+              <select name="ai_provider" defaultValue={s.ai_provider}>
+                <option value="anthropic">Anthropic</option>
+                <option value="openai">OpenAI</option>
+              </select>
+            </label>
+            <label>Datos de Mercado Pago o transferencia<textarea name="ai_transfer_details" defaultValue={s.ai_transfer_details} placeholder="Nombre, RUT/alias, banco o instrucciones de transferencia…" /></label>
+            <label>Link de pago Stripe<input name="ai_stripe_payment_link" defaultValue={s.ai_stripe_payment_link} placeholder="https://buy.stripe.com/…" /></label>
+            <label>Números bloqueados para la IA
+              <textarea name="ai_blocked_numbers" defaultValue={s.ai_blocked_numbers.join('\n')} placeholder="56912345678&#10;573001234567" />
+            </label>
+          </div>
+          <label style={{ marginTop: 12 }}>Contexto y reglas del agente
+            <textarea name="ai_system_prompt" defaultValue={s.ai_system_prompt} placeholder="Incluye servicios, precios, horarios, reglas comerciales y cuándo derivar a Joaquín." style={{ minHeight: 180 }} />
+          </label>
+          <p className="muted small">Las respuestas automáticas se detienen al confirmar reunión/pago, derivar a humano, solicitar baja o cuando se pausa el contacto desde el CRM.</p>
+        </Card>
         <Card title="Verificación de números">
           <div className="form-grid">
             {n('verify_per_hour', 'Consultas por hora', s.verify_per_hour, '', 10, 2000)}

@@ -28,6 +28,12 @@ export type Settings = {
   alert_webhook_url: string;
   alert_min_level: 'info' | 'warn' | 'error' | 'critical';
   ai_personalization: boolean;
+  ai_chat_enabled: boolean;
+  ai_provider: 'anthropic' | 'openai';
+  ai_system_prompt: string;
+  ai_transfer_details: string;
+  ai_stripe_payment_link: string;
+  ai_blocked_numbers: string[];
 };
 
 export const DEFAULTS: Settings = {
@@ -55,6 +61,23 @@ export const DEFAULTS: Settings = {
   alert_webhook_url: '',
   alert_min_level: 'error',
   ai_personalization: false,
+  ai_chat_enabled: false,
+  ai_provider: 'anthropic',
+  ai_system_prompt: `Eres el asistente virtual de jqsystem, una agencia chilena de tecnología para negocios.
+Atiendes por WhatsApp a dueños y encargados que respondieron a Joaquín. Tu objetivo principal es conseguir una reunión corta de 15 minutos con Joaquín.
+Si alguien confirma una reunión o quiere pagar/contratar, deriva a Joaquín y desactiva tu respuesta automática en esa conversación.
+
+Páginas web desde US$250, webs con agenda US$400-US$500 y tiendas US$500-US$1.000. Pago 50% al empezar y 50% al entregar. Agentes de WhatsApp y automatizaciones son personalizados: no des precios exactos y ofrece reunión.
+Entrega web: menos de un día desde recibir logo, fotos y textos. Conceptos de diseño: https://jqsystem-web.vercel.app
+WhatsApp y contacto directo: +56 9 3211 5412 · contacto.jqsystem@gmail.com
+
+Antes de ofrecer reunión conoce brevemente el negocio: rubro, servicios, cómo consiguen clientes y qué quieren lograr. Una pregunta por mensaje.
+Si pide precio exacto, contrato, factura, hablar con una persona, reclama o amenaza, derivalo a Joaquín.
+Si pide no recibir mensajes, despide una sola vez y no vuelvas a escribir.
+No inventes datos, descuentos, plazos ni resultados. Español de Chile, tono cálido y profesional. Mensajes de 1 a 3 frases.`,
+  ai_transfer_details: '',
+  ai_stripe_payment_link: '',
+  ai_blocked_numbers: [],
 };
 
 let cache: { at: number; value: Settings } | null = null;

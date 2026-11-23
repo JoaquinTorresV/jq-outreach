@@ -132,6 +132,12 @@ export async function saveSettings(fd: FormData) {
     alert_webhook_url: /^https:\/\//.test(str(fd, 'alert_webhook_url')) ? str(fd, 'alert_webhook_url') : '',
     alert_min_level: (['info', 'warn', 'error', 'critical'] as const).find((l) => l === str(fd, 'alert_min_level')) ?? 'error',
     ai_personalization: bool(fd, 'ai_personalization'),
+    ai_chat_enabled: bool(fd, 'ai_chat_enabled'),
+    ai_provider: (['anthropic', 'openai'] as const).find((p) => p === str(fd, 'ai_provider')) ?? cur.ai_provider,
+    ai_system_prompt: str(fd, 'ai_system_prompt').slice(0, 12000),
+    ai_transfer_details: str(fd, 'ai_transfer_details').slice(0, 3000),
+    ai_stripe_payment_link: /^https?:\/\//.test(str(fd, 'ai_stripe_payment_link')) ? str(fd, 'ai_stripe_payment_link').slice(0, 1000) : '',
+    ai_blocked_numbers: [...new Set(str(fd, 'ai_blocked_numbers').split(/[\n,\s]+/).map((v) => v.replace(/\D/g, '')).filter((v) => v.length >= 8).slice(0, 500))],
   };
   if (next.followup_days!.length < 3) next.followup_days = DEFAULTS.followup_days;
   try { new Intl.DateTimeFormat('es', { timeZone: next.timezone }); } catch { return back('/settings', 'Zona horaria inválida (ej. America/Santiago)'); }
@@ -175,6 +181,21 @@ export async function saveNotes(fd: FormData) {
   const id = int(fd, 'contact_id', 0, 1e12, 0);
   await exec('update contacts set notes = $2, updated_at = now() where id = $1', [id, String(fd.get('notes') ?? '').slice(0, 4000) || null]);
   back(`/contacts/${id}`, 'Notas guardadas');
+}
+
+export async function toggleContactAi(fd: FormData) {
+  await requireAuth();
+  const id = int(fd, 'contact_id', 0, 1e12, 0);
+  const enabled = bool(fd, 'ai_enabled');
+  await exec(
+    `update contacts set ai_enabled = $2,
+       ai_handoff_at = case when $2 then null else now() end,
+       ai_last_action = case when $2 then 'reactivado_manual' else 'pausado_manual' end,
+       updated_at = now() where id = $1`,
+    [id, enabled],
+  );
+  revalidatePath(`/contacts/${id}`);
+  back(`/contacts/${id}`, enabled ? 'Chatbot activado para este contacto' : 'Chatbot pausado: Joaquín puede continuar desde WhatsApp');
 }
 
 export async function correctContactPhone(fd: FormData) {

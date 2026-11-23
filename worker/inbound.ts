@@ -1,10 +1,12 @@
-import { one, q, tx } from '../src/lib/db';
+import { exec, one, q, tx } from '../src/lib/db';
 import { logEvent, notify } from '../src/lib/events';
 import { getSettings } from '../src/lib/settings';
 import { nextActionAfter } from '../src/lib/schedule';
 import { logger } from '../src/lib/logger';
 import type { ContactRow } from '../src/lib/types';
 import type { InboundEvent } from './client';
+import type { WaClient } from './client';
+import { aiChatReply, isWhatsAppTemplateReply } from './ai';
 
 const OPT_OUT_RE = new RegExp(
   [
@@ -38,7 +40,7 @@ async function findContact(ev: InboundEvent): Promise<ContactRow | null> {
 }
 
 /** Procesa un mensaje (entrante o enviado desde el teléfono) y actualiza el pipeline. */
-export async function handleMessage(ev: InboundEvent): Promise<'ignored' | 'own' | 'manual' | 'reply' | 'optout' | 'duplicate'> {
+export async function handleMessage(ev: InboundEvent, client?: WaClient): Promise<'ignored' | 'own' | 'manual' | 'reply' | 'optout' | 'duplicate'> {
   const contact = await findContact(ev);
   if (!contact) return 'ignored'; // chats personales o gente fuera del pipeline: no se tocan
 
@@ -47,6 +49,9 @@ export async function handleMessage(ev: InboundEvent): Promise<'ignored' | 'own'
 
   const s = await getSettings();
   const optOut = isOptOut(ev.text);
+  const templateReply = isWhatsAppTemplateReply(ev.text);
+  const incomingDigits = ev.phone ?? contact.phone.replace(/\D/g, '');
+  const globallyBlocked = s.ai_blocked_numbers.some((number) => incomingDigits === number || incomingDigits.endsWith(number));
 
   const result = await tx(async (c) => {
     const ins = await c.query(
@@ -60,23 +65,37 @@ export async function handleMessage(ev: InboundEvent): Promise<'ignored' | 'own'
     const stage = contact.stage;
     let newStage = stage;
     let reason: string | null = null;
-    if (optOut && !['cliente', 'calificado'].includes(stage)) {
+    if (templateReply) {
+      // Las respuestas genéricas de WhatsApp Business no cuentan como interés real:
+      // conservan el contacto en seguimiento y no son atendidas por IA.
+      reason = 'respuesta_plantilla_whatsapp';
+    } else if (optOut && !['cliente', 'calificado'].includes(stage)) {
       newStage = 'opt_out';
       reason = 'opt_out_detectado';
     } else if (!REPLIED_OR_CLOSED.includes(stage)) {
       newStage = 'respondio';
     }
-    await c.query(
-      `update contacts set last_inbound_at = now(), stage = $2, stage_reason = coalesce($3, stage_reason),
-         next_action_at = null, account_id = coalesce(account_id, $4), updated_at = now() where id = $1`,
-      [contact.id, newStage, reason, ev.accountId],
-    );
+    if (templateReply) {
+      await c.query(
+        `update contacts set last_inbound_at = null, stage_reason = coalesce($2, stage_reason),
+           account_id = coalesce(account_id, $3), updated_at = now() where id = $1`,
+        [contact.id, reason, ev.accountId],
+      );
+    } else {
+      await c.query(
+        `update contacts set last_inbound_at = now(), stage = $2, stage_reason = coalesce($3, stage_reason),
+           next_action_at = null, account_id = coalesce(account_id, $4), updated_at = now() where id = $1`,
+        [contact.id, newStage, reason, ev.accountId],
+      );
+    }
     // Respuesta recibida: se cancela cualquier seguimiento pendiente
-    await c.query(
-      `update messages set status = 'cancelled', updated_at = now()
-       where contact_id = $1 and direction = 'out' and status in ('retry','queued')`,
-      [contact.id],
-    );
+    if (!templateReply) {
+      await c.query(
+        `update messages set status = 'cancelled', updated_at = now()
+         where contact_id = $1 and direction = 'out' and status in ('retry','queued')`,
+        [contact.id],
+      );
+    }
     return { newStage, messageId: ins.rows[0].id as number };
   });
   if (!result) return 'duplicate';
@@ -84,9 +103,13 @@ export async function handleMessage(ev: InboundEvent): Promise<'ignored' | 'own'
   const who = contact.first_name || contact.business_name || contact.name || contact.phone;
   if (result.newStage === 'opt_out') {
     await logEvent('info', 'opt_out', { texto: ev.text.slice(0, 200) }, { accountId: ev.accountId, contactId: contact.id, messageId: result.messageId });
+    if (client?.isOpen()) await sendFixedReply(ev, contact, client, 'Sin problema, gracias por avisarme. Te deseo mucho éxito con el negocio.');
     return 'optout';
   }
   await logEvent('info', 'respuesta_recibida', { texto: ev.text.slice(0, 200) }, { accountId: ev.accountId, contactId: contact.id, messageId: result.messageId });
+  if (!templateReply && s.ai_chat_enabled && !globallyBlocked && contact.ai_enabled !== false && client?.isOpen()) {
+    await generateAndSendAiReply(ev, contact, client);
+  }
   if (s.notify_replies && !REPLIED_OR_CLOSED.includes(contact.stage)) {
     await notify(`💬 ${who} respondió (cuenta #${ev.accountId}):\n"${ev.text.slice(0, 300)}"\n${contact.phone}`);
   }
@@ -138,6 +161,80 @@ async function handleOutgoing(ev: InboundEvent, contact: ContactRow): Promise<'o
   );
   logger.debug({ contactId: contact.id }, 'mensaje manual a contacto del pipeline: seguimiento pospuesto');
   return 'manual';
+}
+
+async function sendFixedReply(ev: InboundEvent, contact: ContactRow, client: WaClient, text: string) {
+  const jid = contact.jid ?? `${contact.phone.replace('+', '')}@s.whatsapp.net`;
+  const waMessageId = client.newMessageId();
+  try {
+    await client.sendText(jid, text, { messageId: waMessageId, typingMs: 1000 });
+    await exec(
+      `insert into messages (contact_id, account_id, direction, source, body, status, wa_message_id, sent_at)
+       values ($1,$2,'out','ai',$3,'sent',$4,now())`,
+      [contact.id, ev.accountId, text, waMessageId],
+    );
+  } catch (e) {
+    await logEvent('error', 'ia_no_pudo_enviar', { error: (e as Error).message }, { accountId: ev.accountId, contactId: contact.id });
+  }
+}
+
+async function generateAndSendAiReply(ev: InboundEvent, contact: ContactRow, client: WaClient) {
+  const s = await getSettings();
+  const history = await q<{ direction: 'in' | 'out'; body: string | null }>(
+    `select direction, body from messages
+     where contact_id = $1 and direction in ('in','out') and body is not null
+       and status in ('received','sent','delivered','read')
+     order by coalesce(sent_at, created_at) desc, id desc limit 21`,
+    [contact.id],
+  );
+
+  const ai = await aiChatReply({
+    contact,
+    incoming: ev.text,
+    history: history.reverse(),
+    provider: s.ai_provider,
+    systemPrompt: s.ai_system_prompt,
+    transferDetails: s.ai_transfer_details,
+    stripePaymentLink: s.ai_stripe_payment_link,
+  });
+  if (!ai) return;
+
+  const jid = contact.jid ?? `${contact.phone.replace('+', '')}@s.whatsapp.net`;
+  const waMessageId = client.newMessageId();
+  try {
+    await client.sendText(jid, ai.reply, { messageId: waMessageId, typingMs: Math.min(5000, Math.max(1000, ai.reply.length * 45)) });
+  } catch (e) {
+    await logEvent('error', 'ia_no_pudo_enviar', { error: (e as Error).message }, { accountId: ev.accountId, contactId: contact.id });
+    return;
+  }
+
+  await tx(async (c) => {
+    await c.query(
+      `insert into messages (contact_id, account_id, direction, source, body, status, wa_message_id, sent_at)
+       values ($1,$2,'out','ai',$3,'sent',$4,now())`,
+      [contact.id, ev.accountId, ai.reply, waMessageId],
+    );
+    const handoff = ai.action !== 'reply';
+    await c.query(
+      `update contacts set ai_enabled = $2, ai_handoff_at = $3, ai_last_action = $4,
+         stage = case when $5 then 'opt_out' when $6 then 'calificado' else stage end,
+         stage_reason = coalesce($7, stage_reason), next_action_at = null, updated_at = now()
+       where id = $1`,
+      [
+        contact.id,
+        !handoff,
+        handoff ? new Date() : null,
+        ai.action,
+        ai.action === 'opt_out',
+        ai.action === 'meeting_confirmed',
+        ai.action === 'opt_out' ? 'opt_out_ia' : ai.action === 'handoff' || ai.action === 'payment_requested' ? 'derivacion_ia' : null,
+      ],
+    );
+  });
+  await logEvent('info', 'respuesta_ia_enviada', { accion: ai.action, texto: ai.reply.slice(0, 300) }, {
+    accountId: ev.accountId,
+    contactId: contact.id,
+  });
 }
 
 /** Actualiza estado de entrega (entregado/leído) de mensajes enviados por el sistema. */

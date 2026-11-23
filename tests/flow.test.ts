@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { closePool, contact, exec, mkAccount, mkContact, mkDispatcher, msgs, one, q, resetDb } from './helpers';
 import { setSetting } from '../src/lib/settings';
 import { handleMessage, isOptOut } from '../worker/inbound';
+import { isWhatsAppTemplateReply } from '../worker/ai';
 import { applyFailover, supervise } from '../worker/index';
 import { Verifier } from '../worker/verifier';
 import { FakeClient } from '../worker/fake-client';
@@ -113,6 +114,15 @@ describe('flujo completo', () => {
     }
     for (const t of ['Hola, sí me interesa', 'cuánto cuesta?', 'Gracias, lo reviso', 'puedes llamarme mañana?', 'no sé todavía, cuéntame más']) {
       assert.equal(isOptOut(t), false, t);
+    }
+  });
+
+  test('detecta respuestas genéricas de WhatsApp Business', () => {
+    for (const t of ['Hola, dime cómo te llamas y qué necesitas', 'Hola, ¿qué necesitas?', 'Hola, ¿en qué podemos ayudarte?']) {
+      assert.equal(isWhatsAppTemplateReply(t), true, t);
+    }
+    for (const t of ['Sí, necesito una página web', '¿Cuánto cuesta?', 'Quiero agendar una reunión']) {
+      assert.equal(isWhatsAppTemplateReply(t), false, t);
     }
   });
 

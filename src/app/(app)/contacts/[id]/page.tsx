@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { contactOutcome, correctContactPhone, deleteContact, messageAction, saveNotes } from '@/app/actions';
+import { contactOutcome, correctContactPhone, deleteContact, messageAction, saveNotes, toggleContactAi } from '@/app/actions';
 import Flash from '@/components/Flash';
 import { Badge, Card, PageHeader, StageBadge } from '@/components/ui';
 import { ago, contactLabel, fmtDateTime } from '@/lib/format';
@@ -105,6 +105,14 @@ export default async function ContactPage({ params, searchParams }: { params: Pr
                 </select>
               </label>
               <button className="btn primary">Aplicar</button>
+            </form>
+            <form action={toggleContactAi} className="form-row" style={{ marginTop: 12 }}>
+              <input type="hidden" name="contact_id" value={c.id} />
+              <input type="hidden" name="ai_enabled" value={c.ai_enabled ? 'false' : 'true'} />
+              <button className={`btn small ${c.ai_enabled ? 'danger' : 'primary'}`}>
+                {c.ai_enabled ? 'Desactivar chatbot' : 'Activar chatbot'}
+              </button>
+              <span className="muted small">{c.ai_enabled ? 'IA activa para este contacto' : `IA pausada${c.ai_handoff_at ? ` · ${c.ai_last_action ?? 'humano'}` : ''}`}</span>
             </form>
           </Card>
           <Card title="Datos">
